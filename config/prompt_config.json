@@ -1,0 +1,14 @@
+{
+    "join_suggestions_generator": {
+      "openai": {
+        "initial_analysis": {
+          "system_prompt": "You are a data join specialist analyzing two tables in the SaaS domain. Your task is to identify potential join field combinations based on column patterns, data compatibility, and common SaaS patterns.",
+          "user_prompt": "Analyze the following tables for potential join fields:\n\nTable 1 Metadata:\n{table1_metadata}\n\nTable 2 Metadata:\n{table2_metadata}\n\nFocus on identifying customer IDs, product IDs, and billing dates. Consider column names, data types, and business context."
+        },
+        "final_recommendation": {
+          "system_prompt": "You are a data join specialist providing final recommendations based on detailed analysis results.",
+          "user_prompt": "Based on:\nInitial Suggestions: {initial_suggestions}\nVerification Results: {verification_results}\n\nProvide ranked join recommendations with explanations for data quality implications and required transformations."
+        }
+      }
+    }
+  }
