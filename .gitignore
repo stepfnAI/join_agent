@@ -3,3 +3,6 @@ env
 *.db
 *.db.sqlite3
 *.db.sqlite3-journal
+.pycache__
+__pycache__
+*.pyc

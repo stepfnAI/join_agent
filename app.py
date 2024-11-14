@@ -7,10 +7,12 @@ from sfn_blueprint import SFNDataLoader
 from sfn_blueprint import setup_logger
 from sfn_blueprint import SFNDataPostProcessor
 from agents.join_suggestions_agent import SFNJoinSuggestionsAgent
+from views.streamlit_views import StreamlitView
+import json
 
 def run_app():
     # Initialize view and session
-    view = SFNStreamlitView(title="Data Join Advisor")
+    view = StreamlitView(title="Data Join Advisor")
     session = SFNSessionManager()
     
     # Reset button
@@ -79,73 +81,236 @@ def run_app():
         view.display_markdown("---")
 
         if session.get('join_analysis') is None:
-            with view.display_spinner('🤖 AI is analyzing join possibilities...'):
+            # Initial Analysis
+            with view.display_spinner('🤖 AI is analyzing possible join combinations...'):
                 join_analyzer = SFNJoinSuggestionsAgent()
                 analysis_task = Task("Analyze join possibilities", 
-                                   data={'table1': session.get('table1'),
+                                data={'table1': session.get('table1'),
                                         'table2': session.get('table2')})
                 join_analysis = join_analyzer.execute_task(analysis_task)
                 session.set('join_analysis', join_analysis)
                 logger.info("Join analysis completed")
 
-        # Display Join Analysis Results
+        # Display Analysis Results
         if session.get('join_analysis'):
             analysis = session.get('join_analysis')
             
-            # Display initial suggestions
-            view.display_subheader("Suggested Join Fields")
-            for suggestion in analysis['initial_suggestions']:
+            # Show number of suggestions found
+            suggestion_count = analysis['suggestion_count']
+            if suggestion_count == 0:
+                view.show_message("❌ No valid join combinations found.", "error")
+                return
+            elif suggestion_count == 1:
+                view.show_message("✅ Found 1 possible way to join these tables.", "success")
+            else:
+                view.show_message(f"✅ Found {suggestion_count} possible ways to join these tables.", "success")
+
+            # Display all options with their stats
+            view.display_subheader("Available Join Options")
+            for idx, suggestion in enumerate(analysis['initial_suggestions'], 1):
+                # Create verification result key based on the fields being joined
+                date_key = f"{suggestion['date_mapping']['table1_field']}_{suggestion['date_mapping']['table2_field']}"
+                customer_key = f"{suggestion['customer_mapping']['table1_field']}_{suggestion['customer_mapping']['table2_field']}"
+                
+                # Get metrics from verification results
+                date_metrics = analysis['verification_results'].get(date_key, {})
+                customer_metrics = analysis['verification_results'].get(customer_key, {})
+                
                 view.show_message(
-                    f"📌 Join {suggestion['table1_field']} with {suggestion['table2_field']} "
-                    f"({suggestion['field_type']})\n"
-                    f"Reasoning: {suggestion['reasoning']}", 
+                    f"Option {idx}:\n"
+                    f"📌 Join Fields:\n"
+                    f"- Date: {suggestion['date_mapping']['table1_field']} ↔ {suggestion['date_mapping']['table2_field']}\n"
+                    f"- Customer: {suggestion['customer_mapping']['table1_field']} ↔ {suggestion['customer_mapping']['table2_field']}"
+                    + (f"\n- Product: {suggestion['product_mapping']['table1_field']} ↔ {suggestion['product_mapping']['table2_field']}" 
+                    if 'product_mapping' in suggestion and suggestion['product_mapping']['table1_field'] else ""),
                     "info"
                 )
+                
+                # Display metrics using the first available metrics (date or customer)
+                metrics_to_use = date_metrics if date_metrics else customer_metrics
+                if metrics_to_use:
+                    view.show_message(
+                        f"📊 Quality Metrics:\n"
+                        f"- Table 1 Uniqueness: {metrics_to_use.get('uniqueness', {}).get('table1_metrics', {}).get('metrics', {}).get('duplication_rate', 'N/A')}% duplicate rate\n"
+                        f"- Table 2 Uniqueness: {metrics_to_use.get('uniqueness', {}).get('table2_metrics', {}).get('metrics', {}).get('duplication_rate', 'N/A')}% duplicate rate\n"
+                        f"- Pattern Match: {'✅' if metrics_to_use.get('pattern_match', {}).get('table1_pattern', {}).get('checks', {}).get('format_consistency', False) else '⚠️'}\n",
+                        "info"
+                    )
+                view.display_markdown("---")
 
-            # Display verification results
-            view.display_subheader("Join Health Analysis")
-            for field_pair, results in analysis['verification_results'].items():
-                view.show_message(
-                    f"🔍 **{field_pair}**\n"
-                    f"- Uniqueness: {results['uniqueness']['table1']:.2%} (Table 1), "
-                    f"{results['uniqueness']['table2']:.2%} (Table 2)\n"
-                    f"- Value Overlap: {results['overlap']['set1_coverage']:.2%}\n"
-                    f"- Null Values: {results['null_percentage']['table1']:.2%} (Table 1), "
-                    f"{results['null_percentage']['table2']:.2%} (Table 2)",
-                    "info"
+            # Display AI's recommendation
+            view.display_subheader("AI Recommended Join Strategy")
+            recommendation = json.loads(analysis['final_recommendations'])
+            
+            if 'recommended_join' in recommendation:  # Check for the nested structure
+                recommended_join = recommendation['recommended_join']  # Get the nested object
+                view.display_subheader("Final Recommendation")
+                
+                # Safely construct the message
+                message = (
+                    f"🎯 Recommended Join Fields:\n"
+                    f"- Date: {recommended_join.get('date_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('date_mapping', {}).get('table2_field', 'N/A')}\n"
+                    f"- Customer: {recommended_join.get('customer_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('customer_mapping', {}).get('table2_field', 'N/A')}"
                 )
+                
+                # Only add product mapping info if it exists and has valid fields
+                if (recommended_join.get('product_mapping') and 
+                    recommended_join.get('product_mapping', {}).get('table1_field') and 
+                    recommended_join.get('product_mapping', {}).get('table2_field')):
+                    message += f"\n- Product: {recommended_join['product_mapping']['table1_field']} ↔ {recommended_join['product_mapping']['table2_field']}"
+                
+                view.show_message(message, "success")
+                
+                # Only show explanation if it exists
+                if 'explanation' in recommended_join:
+                    view.show_message(f"📝 Reasoning:\n{recommended_join['explanation']}", "info")
+                else:
+                    view.show_message("📝 No detailed explanation available for this recommendation.", "info")
+            else:
+                view.show_message("❌ No recommendation available.", "error")
 
-            # Display final recommendations
-            view.display_subheader("Final Recommendations")
-            view.show_message(analysis['final_recommendations'], "success")
-
-            # Step 3: Join Preview and Export
-            view.display_header("Step 3: Join Preview and Export")
-            view.display_markdown("---")
-
-            # Allow user to select join fields and type
-            selected_fields = view.multiselect(
-                "Select fields to join on",
-                options=[f"{s['table1_field']} ↔ {s['table2_field']}" 
-                        for s in analysis['initial_suggestions']]
+            # User decision
+            join_choice = view.radio_select(
+                "How would you like to proceed?",
+                options=[
+                    "Use AI Recommended Join Strategy",
+                    "Select Columns Manually"
+                ]
             )
 
-            join_type = view.radio_select(
-                "Select join type",
-                options=["inner", "left", "right", "outer"]
-            )
+            if join_choice == "Use AI Recommended Join Strategy":
+                selected_join = {
+                    'customer_mapping': recommendation['recommended_join']['customer_mapping'],
+                    'date_mapping': recommendation['recommended_join']['date_mapping']
+                }
+                # Only add product mapping if it exists and has valid fields
+                if ('product_mapping' in recommendation['recommended_join'] and 
+                    recommendation['recommended_join'].get('product_mapping', {}).get('table1_field') and 
+                    recommendation['recommended_join'].get('product_mapping', {}).get('table2_field')):
+                    selected_join['product_mapping'] = recommendation['recommended_join']['product_mapping']
+            else:  # Manual column selection
+                # Create columns for side-by-side selection
+                col1, col2 = view.create_columns(2)
+                
+                with col1:
+                    view.show_message("Select columns from Table 1", "info")
+                    table1_cols = session.get('table1').columns.tolist()
+                    cust_id_col1 = view.select_box("Customer ID Column (Table 1)", 
+                                                options=table1_cols,
+                                                key="cust_id_1")
+                    date_col1 = view.select_box("Date Column (Table 1)", 
+                                             options=table1_cols,
+                                             key="date_1")
+                    prod_col1 = view.select_box("Product Column (Table 1) - Optional", 
+                                             options=['None'] + table1_cols,
+                                             key="prod_1")
+                
+                with col2:
+                    view.show_message("Select columns from Table 2", "info")
+                    table2_cols = session.get('table2').columns.tolist()
+                    cust_id_col2 = view.select_box("Customer ID Column (Table 2)", 
+                                                options=table2_cols,
+                                                key="cust_id_2")
+                    date_col2 = view.select_box("Date Column (Table 2)", 
+                                             options=table2_cols,
+                                             key="date_2")
+                    prod_col2 = view.select_box("Product Column (Table 2) - Optional", 
+                                             options=['None'] + table2_cols,
+                                             key="prod_2")
 
-            if selected_fields and join_type:
-                # Implement join preview logic here
-                # For now, just show download option
-                post_processor = SFNDataPostProcessor(session.get('table1'))
-                csv_data = post_processor.download_data('csv')
-                view.create_download_button(
-                    label="Download Joined Data",
-                    data=csv_data,
-                    file_name="joined_data.csv",
-                    mime_type="text/csv"
+                # Validate mandatory selections
+                if not (cust_id_col1 and cust_id_col2 and date_col1 and date_col2):
+                    view.show_message("⚠️ Customer ID and Date columns are mandatory!", "warning")
+                    return
+
+                # Create manual join configuration
+                selected_join = {
+                    'customer_mapping': {
+                        'table1_field': cust_id_col1,
+                        'table2_field': cust_id_col2
+                    },
+                    'date_mapping': {
+                        'table1_field': date_col1,
+                        'table2_field': date_col2
+                    }
+                }
+                
+                # Add product mapping only if both product columns are selected
+                if prod_col1 != 'None' and prod_col2 != 'None':
+                    selected_join['product_mapping'] = {
+                        'table1_field': prod_col1,
+                        'table2_field': prod_col2
+                    }
+
+            # Proceed with join
+            proceed = view.display_button("Proceed with Selected Join")
+            
+            if proceed:
+                session.set('selected_join', selected_join)
+                
+                # Perform the join operation
+                with view.display_spinner('Joining tables...'):
+                    table1 = session.get('table1')
+                    table2 = session.get('table2')
+                    
+                    # Create merge conditions
+                    merge_on = [
+                        (selected_join['customer_mapping']['table1_field'], 
+                         selected_join['customer_mapping']['table2_field']),
+                        (selected_join['date_mapping']['table1_field'], 
+                         selected_join['date_mapping']['table2_field'])
+                    ]
+                    
+                    # Only add product mapping if it exists and has valid fields
+                    if ('product_mapping' in selected_join and 
+                        selected_join['product_mapping'].get('table1_field') and 
+                        selected_join['product_mapping'].get('table2_field')):
+                        merge_on.append(
+                            (selected_join['product_mapping']['table1_field'], 
+                             selected_join['product_mapping']['table2_field'])
+                        )
+                    
+                    # Perform merge
+                    joined_table = table1.merge(
+                        table2,
+                        left_on=[m[0] for m in merge_on],
+                        right_on=[m[1] for m in merge_on],
+                        how='inner'
+                    )
+                    
+                    session.set('joined_table', joined_table)
+                    
+                    view.show_message("✅ Tables joined successfully!", "success")
+                
+                # Show options for next steps
+                next_step = view.radio_select(
+                    "What would you like to do next?",
+                    options=[
+                        "View Joined Table",
+                        "Download Joined Table",
+                        "Start Over"
+                    ]
                 )
+                
+                if next_step == "View Joined Table":
+                    view.display_subheader("Joined Table Preview")
+                    view.display_dataframe(joined_table.head(10))
+                    
+                elif next_step == "Download Joined Table":
+                    # Convert to CSV for download
+                    csv = joined_table.to_csv(index=False)
+                    view.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name="joined_tables.csv",
+                        mime="text/csv"
+                    )
+                    
+                elif next_step == "Start Over":
+                    session.clear()
+                    view.rerun_script()
 
-if __name__ == "__main__":
+# ... rest of the code ...
+
+if __name__ == "__main__":        
     run_app()
