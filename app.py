@@ -294,7 +294,7 @@ def run_app():
                     options=[
                         "View Joined Table",
                         "Download Joined Table",
-                        "Start Over"
+                        "Finish"
                     ]
                 )
                 
@@ -312,11 +312,11 @@ def run_app():
                         mime="text/csv"
                     )
                     
-                elif next_step == "Start Over":
-                    session.clear()
-                    view.rerun_script()
-
-# ... rest of the code ...
+                elif next_step == "Finish":
+                    if view.display_button("Confirm Finish"):
+                        view.show_message("Thank you for using the Column Mapping App!", "success")
+                        session.clear()
+                        view.rerun_script()
 
 if __name__ == "__main__":        
     run_app()
