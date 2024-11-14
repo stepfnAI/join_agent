@@ -91,7 +91,6 @@ def run_app():
                 session.set('join_analysis', join_analysis)
                 logger.info("Join analysis completed")
 
-        # Display Analysis Results
         if session.get('join_analysis'):
             analysis = session.get('join_analysis')
             
@@ -105,42 +104,49 @@ def run_app():
             else:
                 view.show_message(f"✅ Found {suggestion_count} possible ways to join these tables.", "success")
 
-            # Display all options with their stats
+            # Display join suggestions
             view.display_subheader("Available Join Options")
-            for idx, suggestion in enumerate(analysis['initial_suggestions'], 1):
-                # Create verification result key based on the fields being joined
-                date_key = f"{suggestion['date_mapping']['table1_field']}_{suggestion['date_mapping']['table2_field']}"
-                customer_key = f"{suggestion['customer_mapping']['table1_field']}_{suggestion['customer_mapping']['table2_field']}"
+            suggestion_data = analysis.get('initial_suggestions', {})
+            
+            if isinstance(suggestion_data, str):
+                try:
+                    suggestion_data = json.loads(suggestion_data)
+                except json.JSONDecodeError:
+                    view.show_message("❌ Error parsing suggestions", "error")
+                    return
+
+            for suggestion_key, suggestion in suggestion_data.items():
+                # Create verification result keys based on the mappings
+                date_key = f"{suggestion.get('DateField', {}).get('table1')}_{suggestion.get('DateField', {}).get('table2')}"
+                customer_key = f"{suggestion.get('CustIDField', {}).get('table1')}_{suggestion.get('CustIDField', {}).get('table2')}"
                 
                 # Get metrics from verification results
                 date_metrics = analysis['verification_results'].get(date_key, {})
                 customer_metrics = analysis['verification_results'].get(customer_key, {})
                 
                 view.show_message(
-                    f"Option {idx}:\n"
+                    f"Option {suggestion_key}:\n"
                     f"📌 Join Fields:\n"
-                    f"- Date: {suggestion['date_mapping']['table1_field']} ↔ {suggestion['date_mapping']['table2_field']}\n"
-                    f"- Customer: {suggestion['customer_mapping']['table1_field']} ↔ {suggestion['customer_mapping']['table2_field']}"
-                    + (f"\n- Product: {suggestion['product_mapping']['table1_field']} ↔ {suggestion['product_mapping']['table2_field']}" 
-                    if 'product_mapping' in suggestion and suggestion['product_mapping']['table1_field'] else ""),
+                    f"- Date: {suggestion.get('DateField', {}).get('table1')} ↔ {suggestion.get('DateField', {}).get('table2')}\n"
+                    f"- Customer: {suggestion.get('CustIDField', {}).get('table1')} ↔ {suggestion.get('CustIDField', {}).get('table2')}"
+                    + (f"\n- Product: {suggestion.get('ProdID', {}).get('table1')} ↔ {suggestion.get('ProdID', {}).get('table2')}" 
+                    if suggestion.get('ProdID', {}).get('table1') else ""),
                     "info"
                 )
                 
-                # Display metrics using the first available metrics (date or customer)
-                metrics_to_use = date_metrics if date_metrics else customer_metrics
-                if metrics_to_use:
-                    view.show_message(
-                        f"📊 Quality Metrics:\n"
-                        f"- Table 1 Uniqueness: {metrics_to_use.get('uniqueness', {}).get('table1_metrics', {}).get('metrics', {}).get('duplication_rate', 'N/A')}% duplicate rate\n"
-                        f"- Table 2 Uniqueness: {metrics_to_use.get('uniqueness', {}).get('table2_metrics', {}).get('metrics', {}).get('duplication_rate', 'N/A')}% duplicate rate\n"
-                        f"- Pattern Match: {'✅' if metrics_to_use.get('pattern_match', {}).get('table1_pattern', {}).get('checks', {}).get('format_consistency', False) else '⚠️'}\n",
-                        "info"
-                    )
+                # # Display metrics using the first available metrics (date or customer)
+                # metrics_to_use = date_metrics if date_metrics else customer_metrics
+                # if metrics_to_use:
+                #     view.show_message(
+                #         f"📊 Quality Metrics:\n"
+                #         f"- Value Overlap: {metrics_to_use.get('value_overlap', {}).get('metrics', {}).get('overlap_percentage', 'N/A')}%\n",
+                #         "info"
+                #     )
                 view.display_markdown("---")
 
             # Display AI's recommendation
             view.display_subheader("AI Recommended Join Strategy")
-            recommendation = json.loads(analysis['final_recommendations'])
+            recommendation = analysis['final_recommendations']
             
             if 'recommended_join' in recommendation:  # Check for the nested structure
                 recommended_join = recommendation['recommended_join']  # Get the nested object
