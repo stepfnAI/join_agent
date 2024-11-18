@@ -104,10 +104,12 @@ def run_app():
             else:
                 view.show_message(f"✅ Found {suggestion_count} possible ways to join these tables.", "success")
 
-            # Display join suggestions
+        
+             # Display join suggestions
             view.display_subheader("Available Join Options")
             suggestion_data = analysis.get('initial_suggestions', {})
-            
+
+        
             if isinstance(suggestion_data, str):
                 try:
                     suggestion_data = json.loads(suggestion_data)
@@ -134,189 +136,321 @@ def run_app():
                     "info"
                 )
                 
-                # # Display metrics using the first available metrics (date or customer)
-                # metrics_to_use = date_metrics if date_metrics else customer_metrics
-                # if metrics_to_use:
-                #     view.show_message(
-                #         f"📊 Quality Metrics:\n"
-                #         f"- Value Overlap: {metrics_to_use.get('value_overlap', {}).get('metrics', {}).get('overlap_percentage', 'N/A')}%\n",
-                #         "info"
-                #     )
                 view.display_markdown("---")
 
             # Display AI's recommendation
             view.display_subheader("AI Recommended Join Strategy")
             recommendation = analysis['final_recommendations']
             
-            if 'recommended_join' in recommendation:  # Check for the nested structure
-                recommended_join = recommendation['recommended_join']  # Get the nested object
-                view.display_subheader("Final Recommendation")
-                
-                # Safely construct the message
-                message = (
-                    f"🎯 Recommended Join Fields:\n"
-                    f"- Date: {recommended_join.get('date_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('date_mapping', {}).get('table2_field', 'N/A')}\n"
-                    f"- Customer: {recommended_join.get('customer_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('customer_mapping', {}).get('table2_field', 'N/A')}"
-                )
-                
-                # Only add product mapping info if it exists and has valid fields
-                if (recommended_join.get('product_mapping') and 
-                    recommended_join.get('product_mapping', {}).get('table1_field') and 
-                    recommended_join.get('product_mapping', {}).get('table2_field')):
-                    message += f"\n- Product: {recommended_join['product_mapping']['table1_field']} ↔ {recommended_join['product_mapping']['table2_field']}"
-                
-                view.show_message(message, "success")
-                
-                # Only show explanation if it exists
-                if 'explanation' in recommended_join:
-                    view.show_message(f"📝 Reasoning:\n{recommended_join['explanation']}", "info")
+            # Only show AI recommendations and join selection if join is not confirmed
+            if not session.get('join_confirmed'):
+                if 'recommended_join' in recommendation:  # Check for the nested structure
+                    recommended_join = recommendation['recommended_join']  # Get the nested object
+                    view.display_subheader("Final Recommendation")
+                    
+                    # Safely construct the message
+                    message = (
+                        f"🎯 Recommended Join Fields:\n"
+                        f"- Date: {recommended_join.get('date_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('date_mapping', {}).get('table2_field', 'N/A')}\n"
+                        f"- Customer: {recommended_join.get('customer_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('customer_mapping', {}).get('table2_field', 'N/A')}"
+                    )
+                    
+                    # Only add product mapping info if it exists and has valid fields
+                    if (recommended_join.get('product_mapping') and 
+                        recommended_join.get('product_mapping', {}).get('table1_field') and 
+                        recommended_join.get('product_mapping', {}).get('table2_field')):
+                        message += f"\n- Product: {recommended_join['product_mapping']['table1_field']} ↔ {recommended_join['product_mapping']['table2_field']}"
+                    
+                    view.show_message(message, "success")
+                    
+                    # Only show explanation if it exists
+                    if 'explanation' in recommended_join:
+                        view.show_message(f"📝 Reasoning:\n{recommended_join['explanation']}", "info")
+                    else:
+                        view.show_message("📝 No detailed explanation available for this recommendation.", "info")
                 else:
-                    view.show_message("📝 No detailed explanation available for this recommendation.", "info")
-            else:
-                view.show_message("❌ No recommendation available.", "error")
+                    view.show_message("❌ No recommendation available.", "error")
 
-            # User decision
-            join_choice = view.radio_select(
-                "How would you like to proceed?",
-                options=[
-                    "Use AI Recommended Join Strategy",
-                    "Select Columns Manually"
-                ]
-            )
+                join_choice = view.radio_select(
+                    "How would you like to proceed?",
+                    options=[
+                        "Select Appropriate Method",
+                        "Use AI Recommended Join Strategy",
+                        "Select Columns Manually"
+                    ]
+                )
 
-            if join_choice == "Use AI Recommended Join Strategy":
-                selected_join = {
-                    'customer_mapping': recommendation['recommended_join']['customer_mapping'],
-                    'date_mapping': recommendation['recommended_join']['date_mapping']
-                }
-                # Only add product mapping if it exists and has valid fields
-                if ('product_mapping' in recommendation['recommended_join'] and 
-                    recommendation['recommended_join'].get('product_mapping', {}).get('table1_field') and 
-                    recommendation['recommended_join'].get('product_mapping', {}).get('table2_field')):
-                    selected_join['product_mapping'] = recommendation['recommended_join']['product_mapping']
-            else:  # Manual column selection
-                # Create columns for side-by-side selection
-                col1, col2 = view.create_columns(2)
-                
-                with col1:
-                    view.show_message("Select columns from Table 1", "info")
-                    table1_cols = session.get('table1').columns.tolist()
-                    cust_id_col1 = view.select_box("Customer ID Column (Table 1)", 
-                                                options=table1_cols,
-                                                key="cust_id_1")
-                    date_col1 = view.select_box("Date Column (Table 1)", 
-                                             options=table1_cols,
-                                             key="date_1")
-                    prod_col1 = view.select_box("Product Column (Table 1) - Optional", 
-                                             options=['None'] + table1_cols,
-                                             key="prod_1")
-                
-                with col2:
-                    view.show_message("Select columns from Table 2", "info")
-                    table2_cols = session.get('table2').columns.tolist()
-                    cust_id_col2 = view.select_box("Customer ID Column (Table 2)", 
-                                                options=table2_cols,
-                                                key="cust_id_2")
-                    date_col2 = view.select_box("Date Column (Table 2)", 
-                                             options=table2_cols,
-                                             key="date_2")
-                    prod_col2 = view.select_box("Product Column (Table 2) - Optional", 
-                                             options=['None'] + table2_cols,
-                                             key="prod_2")
-
-                # Validate mandatory selections
-                if not (cust_id_col1 and cust_id_col2 and date_col1 and date_col2):
-                    view.show_message("⚠️ Customer ID and Date columns are mandatory!", "warning")
-                    return
-
-                # Create manual join configuration
-                selected_join = {
-                    'customer_mapping': {
-                        'table1_field': cust_id_col1,
-                        'table2_field': cust_id_col2
-                    },
-                    'date_mapping': {
-                        'table1_field': date_col1,
-                        'table2_field': date_col2
+                # Show AI recommendation details and health check option
+                if join_choice == "Use AI Recommended Join Strategy":
+                    selected_join = {
+                        'customer_mapping': recommendation['recommended_join']['customer_mapping'],
+                        'date_mapping': recommendation['recommended_join']['date_mapping']
                     }
-                }
+                    if ('product_mapping' in recommendation['recommended_join'] and 
+                        recommendation['recommended_join'].get('product_mapping', {}).get('table1_field') and 
+                        recommendation['recommended_join'].get('product_mapping', {}).get('table2_field')):
+                        selected_join['product_mapping'] = recommendation['recommended_join']['product_mapping']
+                    
+                    # Store selected_join in session immediately
+                    session.set('selected_join', selected_join)
+                    
+                    # Add health check button for AI recommendation
+                    if view.display_button("Check AI Recommendation Join Health", key='check_ai_health'):
+                        table1 = session.get('table1')
+                        table2 = session.get('table2')
+                        health_check = check_join_health(table1, table2, selected_join)
+                        display_join_health(health_check, view, session)
+                        session.set('join_health', health_check)  
                 
-                # Add product mapping only if both product columns are selected
-                if prod_col1 != 'None' and prod_col2 != 'None':
-                    selected_join['product_mapping'] = {
-                        'table1_field': prod_col1,
-                        'table2_field': prod_col2
-                    }
-
-            # Proceed with join
-            proceed = view.display_button("Proceed with Selected Join")
-            
-            if proceed:
-                session.set('selected_join', selected_join)
-                
-                # Perform the join operation
-                with view.display_spinner('Joining tables...'):
+                if join_choice == "Select Columns Manually":
+                    view.display_subheader("Manual Column Mapping")
+                    
+                    # Get tables from session
                     table1 = session.get('table1')
                     table2 = session.get('table2')
                     
-                    # Create merge conditions
-                    merge_on = [
-                        (selected_join['customer_mapping']['table1_field'], 
-                         selected_join['customer_mapping']['table2_field']),
-                        (selected_join['date_mapping']['table1_field'], 
-                         selected_join['date_mapping']['table2_field'])
-                    ]
+                    # Create columns for side-by-side selection
+                    col1, col2 = view.create_columns(2)
                     
-                    # Only add product mapping if it exists and has valid fields
-                    if ('product_mapping' in selected_join and 
-                        selected_join['product_mapping'].get('table1_field') and 
-                        selected_join['product_mapping'].get('table2_field')):
-                        merge_on.append(
-                            (selected_join['product_mapping']['table1_field'], 
-                             selected_join['product_mapping']['table2_field'])
+                    with col1:
+                        view.show_message("Table 1 Columns", "info")
+                        table1_cols = [''] + list(table1.columns)
+                        cust_id_col1 = view.select_box(
+                            "Customer ID Column (Required)",
+                            options=table1_cols,
+                            key="cust_id_1"
+                        )
+                        date_col1 = view.select_box(
+                            "Date Column (Required)",
+                            options=table1_cols,
+                            key="date_1"
+                        )
+                        prod_col1 = view.select_box(
+                            "Product Column (Optional)",
+                            options=['None'] + list(table1.columns),
+                            key="prod_1"
                         )
                     
-                    # Perform merge
-                    joined_table = table1.merge(
-                        table2,
-                        left_on=[m[0] for m in merge_on],
-                        right_on=[m[1] for m in merge_on],
-                        how='inner'
+                    with col2:
+                        view.show_message("Table 2 Columns", "info")
+                        table2_cols = [''] + list(table2.columns)
+                        cust_id_col2 = view.select_box(
+                            "Customer ID Column (Required)",
+                            options=table2_cols,
+                            key="cust_id_2"
+                        )
+                        date_col2 = view.select_box(
+                            "Date Column (Required)",
+                            options=table2_cols,
+                            key="date_2"
+                        )
+                        prod_col2 = view.select_box(
+                            "Product Column (Optional)",
+                            options=['None'] + list(table2.columns),
+                            key="prod_2"
+                        )
+
+                    # Create mapping configuration
+                    selected_join = {
+                        'customer_mapping': {
+                            'table1_field': cust_id_col1,
+                            'table2_field': cust_id_col2
+                        },
+                        'date_mapping': {
+                            'table1_field': date_col1,
+                            'table2_field': date_col2
+                        }
+                    }
+                    
+                    # Add product mapping only if both product columns are selected and not 'None'
+                    if prod_col1 != 'None' and prod_col2 != 'None':
+                        selected_join['product_mapping'] = {
+                            'table1_field': prod_col1,
+                            'table2_field': prod_col2
+                        }
+                    
+                    # Validate selections
+                    is_valid = (
+                        cust_id_col1 and cust_id_col2 and  # Customer ID fields selected
+                        date_col1 and date_col2 and        # Date fields selected
+                        cust_id_col1 != '' and cust_id_col2 != '' and  # Not empty strings
+                        date_col1 != '' and date_col2 != ''            # Not empty strings
                     )
                     
-                    session.set('joined_table', joined_table)
-                    
-                    view.show_message("✅ Tables joined successfully!", "success")
+                    if not is_valid:
+                        view.show_message("⚠️ Please select required mapping fields (Customer ID and Date)", "warning")
+                    else:
+                        # Store selected_join in session
+                        session.set('selected_join', selected_join)
+                        
+                        # Show button to check join health
+                        if view.display_button("Check Join Health", key='check_health'):
+                            health_check = check_join_health(table1, table2, selected_join)
+                            display_join_health(health_check, view, session)
+                            session.set('join_health', health_check)
+
+
+            # Add confirmation button here, outside of display_join_health
+            if session.get('join_health') and not session.get('join_confirmed'):
+                if view.display_button("Confirm Join Strategy", key="confirm_join"):
+                    session.set('join_confirmed', True)
+                    view.show_message("✅ Join strategy confirmed! Proceed to next step.", "success")
+                    view.rerun_script()    
+
+            if session.get('join_confirmed'):
+                # Show join summary
+                table1 = session.get('table1')
+                table2 = session.get('table2')
+                selected_join = session.get('selected_join')
                 
-                # Show options for next steps
-                next_step = view.radio_select(
-                    "What would you like to do next?",
-                    options=[
-                        "View Joined Table",
-                        "Download Joined Table",
-                        "Finish"
-                    ]
+                # Count mapped fields
+                mapped_fields = sum(1 for k in ['customer_mapping', 'date_mapping', 'product_mapping'] 
+                                if k in selected_join and selected_join[k].get('table1_field'))
+                
+                display_join_health(session.get('join_health'), view, session)
+
+                view.display_header("Step 3: Post Processing")
+                view.display_markdown("---")
+                
+                operation_type = view.radio_select(
+                    "Choose an operation:",
+                    ["View Joined Data", "Download Joined Data", "Finish"]
                 )
+
+                # Perform join operation if not already done
+                if session.get('final_df') is None:
+                    with view.display_spinner('Joining tables...'):
+                        # Create merge conditions
+                        merge_conditions = [
+                            (selected_join['customer_mapping']['table1_field'], 
+                            selected_join['customer_mapping']['table2_field']),
+                            (selected_join['date_mapping']['table1_field'], 
+                            selected_join['date_mapping']['table2_field'])
+                        ]
+                        
+                        # Add product mapping if exists
+                        if ('product_mapping' in selected_join and 
+                            selected_join['product_mapping'].get('table1_field')):
+                            merge_conditions.append(
+                                (selected_join['product_mapping']['table1_field'], 
+                                selected_join['product_mapping']['table2_field'])
+                            )
+                        
+                        # Perform merge
+                        joined_df = table1.merge(
+                            table2,
+                            left_on=[m[0] for m in merge_conditions],
+                            right_on=[m[1] for m in merge_conditions],
+                            how='inner'
+                        )
+                        session.set('final_df', joined_df)
+
+                if operation_type == "View Joined Data":
+                    view.display_subheader("Joined Data Preview")
+                    view.display_dataframe(session.get('final_df').head(10))
                 
-                if next_step == "View Joined Table":
-                    view.display_subheader("Joined Table Preview")
-                    view.display_dataframe(joined_table.head(10))
-                    
-                elif next_step == "Download Joined Table":
-                    # Convert to CSV for download
-                    csv = joined_table.to_csv(index=False)
-                    view.download_button(
+                elif operation_type == "Download Joined Data":
+                    post_processor = SFNDataPostProcessor(session.get('final_df'))
+                    csv_data = post_processor.download_data('csv')
+                    view.create_download_button(
                         label="Download CSV",
-                        data=csv,
-                        file_name="joined_tables.csv",
-                        mime="text/csv"
+                        data=csv_data,
+                        file_name="joined_data.csv",
+                        mime_type="text/csv"
                     )
-                    
-                elif next_step == "Finish":
+                
+                elif operation_type == "Finish":
                     if view.display_button("Confirm Finish"):
-                        view.show_message("Thank you for using the Column Mapping App!", "success")
+                        view.show_message("Thank you for using the Data Join Advisor!", "success")
                         session.clear()
                         view.rerun_script()
+
+
+def check_join_health(table1, table2, selected_join):
+    """Check join health for manually selected columns"""
+    verification_results = {}
+    
+    # Check individual field overlaps
+    for mapping_type, mapping in selected_join.items():
+        field1 = mapping['table1_field']
+        field2 = mapping['table2_field']
+        
+        values1 = set(table1[field1].dropna().unique())
+        values2 = set(table2[field2].dropna().unique())
+        overlap = values1.intersection(values2)
+        
+        verification_results[f"{field1}_{field2}"] = {
+            "overlap_percentage": len(overlap) / max(len(values1), len(values2)) * 100,
+            "total_values_table1": len(values1),
+            "total_values_table2": len(values2),
+            "overlapping_values": len(overlap)
+        }
+    
+    # Check combined overlap
+    merge_conditions = [
+        (selected_join['customer_mapping']['table1_field'], 
+         selected_join['customer_mapping']['table2_field']),
+        (selected_join['date_mapping']['table1_field'], 
+         selected_join['date_mapping']['table2_field'])
+    ]
+    
+    if 'product_mapping' in selected_join:
+        merge_conditions.append(
+            (selected_join['product_mapping']['table1_field'], 
+             selected_join['product_mapping']['table2_field'])
+        )
+    
+    merged_df = table1.merge(
+        table2,
+        left_on=[m[0] for m in merge_conditions],
+        right_on=[m[1] for m in merge_conditions],
+        how='inner'
+    )
+    
+    verification_results['combined_overlap'] = {
+        "total_records_table1": len(table1),
+        "total_records_table2": len(table2),
+        "matching_records": len(merged_df),
+        "overlap_percentage": (len(merged_df) / min(len(table1), len(table2))) * 100
+    }
+    
+    return verification_results
+
+
+def display_join_health(verification_results, view, session):
+    """Display join health status"""
+    combined_metrics = verification_results['combined_overlap']
+    selected_join = session.get('selected_join')
+
+    # Create field keys for verification results
+    customer_key = f"{selected_join['customer_mapping']['table1_field']}_{selected_join['customer_mapping']['table2_field']}"
+    date_key = f"{selected_join['date_mapping']['table1_field']}_{selected_join['date_mapping']['table2_field']}"
+
+    # Create a comprehensive message combining both recommendation and health metrics
+    message = (
+        f"🎯 **Selected Join Strategy:**\n\n"  # Added extra newline for spacing
+        f"   • Customer: {selected_join['customer_mapping']['table1_field']} ↔ {selected_join['customer_mapping']['table2_field']}"
+        f" (Match Rate: {verification_results[customer_key]['overlap_percentage']:.1f}%)\n\n"
+        f"   • Date: {selected_join['date_mapping']['table1_field']} ↔ {selected_join['date_mapping']['table2_field']}"
+        f" (Match Rate: {verification_results[date_key]['overlap_percentage']:.1f}%)\n\n"
+    )
+
+    # Add product mapping if it exists
+    if 'product_mapping' in selected_join:
+        product_key = f"{selected_join['product_mapping']['table1_field']}_{selected_join['product_mapping']['table2_field']}"
+        message += (
+            f"\n   • Product: {selected_join['product_mapping']['table1_field']} ↔ {selected_join['product_mapping']['table2_field']}"
+            f" (Match Rate: {verification_results[product_key]['overlap_percentage']:.1f}%)"
+        )
+
+    message += (
+        f"\n\n📊 **Overall Join Impact:**\n\n"  # Added extra newline for spacing
+        f"   • Total Records: {combined_metrics['total_records_table1']:,} (Table 1) ↔ {combined_metrics['total_records_table2']:,} (Table 2)\n\n"
+        f"   • Matching Records: {combined_metrics['matching_records']:,}\n\n"
+        f"   • Overall Match Rate: {combined_metrics['overlap_percentage']:.1f}%"
+    )
+
+    view.show_message(message, "info")
 
 if __name__ == "__main__":        
     run_app()

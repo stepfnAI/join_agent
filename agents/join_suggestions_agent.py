@@ -106,6 +106,7 @@ class SFNJoinSuggestionsAgent(SFNAgent):
                 'ProdID': 'product_mapping'
             }
             
+            # Individual field overlap checks
             for prompt_key, verify_key in field_mappings.items():
                 if prompt_key in suggestion and suggestion[prompt_key].get('table1') and suggestion[prompt_key].get('table2'):
                     field1 = suggestion[prompt_key]['table1']
@@ -125,7 +126,29 @@ class SFNJoinSuggestionsAgent(SFNAgent):
                         "total_values_table2": len(values2),
                         "overlapping_values": len(overlap)
                     }
-        print("\n\n>>>verification results",verification_results)
+            
+            # Combined fields overlap check
+            merge_conditions = []
+            for prompt_key, mapping in suggestion.items():
+                if mapping.get('table1') and mapping.get('table2'):
+                    merge_conditions.append((mapping['table1'], mapping['table2']))
+            
+            if merge_conditions:
+                # Perform merge to check combined overlap
+                merged_df = df1.merge(
+                    df2,
+                    left_on=[m[0] for m in merge_conditions],
+                    right_on=[m[1] for m in merge_conditions],
+                    how='inner'
+                )
+                
+                verification_results[f"combined_overlap_{suggestion_key}"] = {
+                    "total_records_table1": len(df1),
+                    "total_records_table2": len(df2),
+                    "matching_records": len(merged_df),
+                    "overlap_percentage": (len(merged_df) / min(len(df1), len(df2))) * 100
+                }
+        
         return verification_results
 
     def _generate_final_recommendations(self, suggestions: Dict, verification_results: Dict) -> str:
