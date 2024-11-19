@@ -146,13 +146,28 @@ class SFNJoinSuggestionsAgent(SFNAgent):
                     "total_records_table1": len(df1),
                     "total_records_table2": len(df2),
                     "matching_records": len(merged_df),
-                    "overlap_percentage": (len(merged_df) / min(len(df1), len(df2))) * 100
+                    "overlap_percentage":(len(merged_df) / min(len(df1), len(df2))) * 100
                 }
         
         return verification_results
 
     def _generate_final_recommendations(self, suggestions: Dict, verification_results: Dict) -> str:
         """Generate final recommendations based on overlap verification"""
+        # Check if any suggestions have matching records
+            # Check if any suggestions have matching records
+        has_valid_joins = False
+        total_matching_records = 0
+        
+        # Check all combined overlap keys (combined_overlap_1, combined_overlap_2, etc.)
+        for key in verification_results:
+            if key.startswith('combined_overlap_') and verification_results[key]['matching_records'] > 0:
+                total_matching_records += verification_results[key]['matching_records']
+                has_valid_joins = True
+        
+        if not has_valid_joins or total_matching_records == 0:
+            print("\n\n>>> No valid joins found - all combinations result in zero matching records")
+            return {}  # Return empty JSON for zero overlap casehas_valid_joins = False
+        
         context = {
             'initial_suggestions': suggestions,
             'verification_results': verification_results
@@ -178,8 +193,58 @@ class SFNJoinSuggestionsAgent(SFNAgent):
             print("\n\n>>>final recommendations",recommendations)
             try:
                 return json.loads(recommendations)  # Return parsed JSON
+
             except json.JSONDecodeError:
                 return "{}"  # Return empty JSON object if parsing fails
         except Exception as e:
             print(f"Error processing recommendations: {str(e)}")
             return "{}"
+        
+    def check_join_health(self, table1, table2, selected_join):
+        """Check join health for manually selected columns"""
+        verification_results = {}
+        
+        # Check individual field overlaps
+        for mapping_type, mapping in selected_join.items():
+            field1 = mapping['table1_field']
+            field2 = mapping['table2_field']
+            
+            values1 = set(table1[field1].dropna().unique())
+            values2 = set(table2[field2].dropna().unique())
+            overlap = values1.intersection(values2)
+            
+            verification_results[f"{field1}_{field2}"] = {
+                "overlap_percentage": len(overlap) / max(len(values1), len(values2)) * 100,
+                "total_values_table1": len(values1),
+                "total_values_table2": len(values2),
+                "overlapping_values": len(overlap)
+            }
+        
+        # Check combined overlap
+        merge_conditions = [
+            (selected_join['customer_mapping']['table1_field'], 
+            selected_join['customer_mapping']['table2_field']),
+            (selected_join['date_mapping']['table1_field'], 
+            selected_join['date_mapping']['table2_field'])
+        ]
+        
+        if 'product_mapping' in selected_join:
+            merge_conditions.append(
+                (selected_join['product_mapping']['table1_field'], 
+                selected_join['product_mapping']['table2_field'])
+            )
+        
+        merged_df = table1.merge(
+            table2,
+            left_on=[m[0] for m in merge_conditions],
+            right_on=[m[1] for m in merge_conditions],
+            how='inner'
+        )
+        
+        verification_results['combined_overlap'] = {
+            "total_records_table1": len(table1),
+            "total_records_table2": len(table2),
+            "matching_records": len(merged_df),
+            "overlap_percentage": (len(merged_df) / min(len(table1), len(table2))) * 100
+        }
+        return verification_results
