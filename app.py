@@ -103,13 +103,14 @@ def run_app():
                 # Show number of suggestions found
                 suggestion_count = analysis['suggestion_count']
                 if suggestion_count == 0 or not analysis['final_recommendations']:  # Modified condition
-                    view.show_message("❌ No valid join combinations found. This could be due to:", "error")
+                    view.show_message("❌ Agent could not find valid join combination.", "error")
                     view.show_message("""
-                    • Different date ranges in the tables
-                    • No matching customer IDs
-                    • Data format mismatches
+                    This could be due to: \n
+                    • Different date ranges in the tables \n
+                    • No matching customer IDs \n
+                    • Data format mismatches \n
                     
-                    Please try manual column mapping for more control.""", "info")
+                    Please try manual column mapping for more control.""", "error")
                     join_choice = "Select Columns Manually"
 
                       # Force manual mapping
@@ -150,11 +151,11 @@ def run_app():
                             "info"
                         )
                     
-                        view.display_markdown("---")
+                    view.display_markdown("---")
 
-                        # Display AI's recommendation
-                        view.display_subheader("AI Recommended Join Strategy")
-                        recommendation = analysis['final_recommendations']
+                    # Display AI's recommendation
+                    view.display_subheader("AI Recommended Join Strategy")
+                    recommendation = analysis['final_recommendations']
                 
 
                     if 'recommended_join' in recommendation:  # Check for the nested structure

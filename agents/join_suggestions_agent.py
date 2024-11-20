@@ -209,16 +209,61 @@ class SFNJoinSuggestionsAgent(SFNAgent):
             field1 = mapping['table1_field']
             field2 = mapping['table2_field']
             
-            values1 = set(table1[field1].dropna().unique())
-            values2 = set(table2[field2].dropna().unique())
-            overlap = values1.intersection(values2)
-            
-            verification_results[f"{field1}_{field2}"] = {
-                "overlap_percentage": len(overlap) / max(len(values1), len(values2)) * 100,
-                "total_values_table1": len(values1),
-                "total_values_table2": len(values2),
-                "overlapping_values": len(overlap)
-            }
+            # Special handling for date fields based on mapping_type
+            if mapping_type == 'date_mapping':  # Changed from 'date' to 'date_mapping'
+                try:
+                    dates1 = pd.to_datetime(table1[field1]).dropna()
+                    dates2 = pd.to_datetime(table2[field2]).dropna()
+                    
+                    # Get date ranges
+                    date_range1 = dates1.agg(['min', 'max'])
+                    date_range2 = dates2.agg(['min', 'max'])
+                    
+                    # Get unique months in each dataset
+                    months1 = set(dates1.dt.to_period('M'))
+                    months2 = set(dates2.dt.to_period('M'))
+                    
+                    # Calculate overlapping months
+                    overlapping_months = months1.intersection(months2)
+                    all_months = months1.union(months2)
+                    missing_months = all_months - overlapping_months
+                    
+                    verification_results[f"{field1}_{field2}"] = {
+                        "mapping_type": "date_mapping",  # Changed to match the key
+                        "overlap_percentage": len(overlapping_months) / len(all_months) * 100,
+                        "total_months_table1": len(months1),
+                        "total_months_table2": len(months2),
+                        "overlapping_months": len(overlapping_months),
+                        "missing_months": len(missing_months),
+                        "date_range_table1": {
+                            "start": date_range1['min'].strftime('%Y-%m-%d'),
+                            "end": date_range1['max'].strftime('%Y-%m-%d')
+                        },
+                        "date_range_table2": {
+                            "start": date_range2['min'].strftime('%Y-%m-%d'),
+                            "end": date_range2['max'].strftime('%Y-%m-%d')
+                        },
+                        "missing_periods": [str(m) for m in sorted(missing_months)][:5]
+                    }
+                except Exception as e:
+                    verification_results[f"{field1}_{field2}"] = {
+                        "mapping_type": "date_mapping",
+                        "error": f"Failed to analyze date overlap: {str(e)}"
+                    }
+            else:
+                # Original logic for non-date fields
+                values1 = set(table1[field1].dropna().unique())
+                values2 = set(table2[field2].dropna().unique())
+                overlap = values1.intersection(values2)
+                
+                verification_results[f"{field1}_{field2}"] = {
+                    "mapping_type": mapping_type,
+                    "overlap_percentage": len(overlap) / max(len(values1), len(values2)) * 100,
+                    "total_values_table1": len(values1),
+                    "total_values_table2": len(values2),
+                    "overlapping_values": len(overlap)
+                }
+
         
         # Check combined overlap
         merge_conditions = [
