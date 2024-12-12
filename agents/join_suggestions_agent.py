@@ -1,14 +1,13 @@
 from typing import List, Dict
 import pandas as pd
-from sfn_blueprint import SFNAgent, Task, SFNOpenAIClient, SFNPromptManager
-from config.model_config import MODEL_CONFIG
+from sfn_blueprint import SFNAgent, Task, SFNAIHandler, SFNPromptManager
+from config.model_config import MODEL_CONFIG, DEFAULT_LLM_PROVIDER
 import os
 import json
-
 class SFNJoinSuggestionsAgent(SFNAgent):
     def __init__(self):
         super().__init__(name="Join Suggestion Generator", role="Data Join Advisor")
-        self.client = SFNOpenAIClient()
+        self.ai_handler = SFNAIHandler(logger_name=f"AIHandler- Join Suggestions Agent")
         self.model_config = MODEL_CONFIG["join_suggestions_generator"]
         parent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
         prompt_config_path = os.path.join(parent_path, 'config', 'prompt_config.json')
@@ -59,24 +58,26 @@ class SFNJoinSuggestionsAgent(SFNAgent):
 
     def _generate_initial_suggestions(self, metadata: Dict) -> Dict:
         """Generate initial join suggestions based on metadata"""
-        system_prompt, user_prompt = self.prompt_manager.get_prompt('initial_join_suggestions_generator',llm_provider='openai',**metadata)
-        
-        # Get suggestions from LLM
-        response = self.client.chat.completions.create(
-            model=self.model_config["model"],
-            messages=[
+        system_prompt, user_prompt = self.prompt_manager.get_prompt('initial_join_suggestions_generator',llm_provider=DEFAULT_LLM_PROVIDER,**metadata)
+        configuration = {
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=self.model_config["temperature"],
-            max_tokens=self.model_config["max_tokens"],
-            n=self.model_config["n"],
-            stop=self.model_config["stop"]
+            "temperature": self.model_config["temperature"],
+            "max_tokens": self.model_config["max_tokens"],
+            "n": self.model_config["n"],
+            "stop": self.model_config["stop"]
+        }
+        # Get suggestions from LLM
+        response, token_cost_summary = self.ai_handler.route_to(
+            llm_provider=DEFAULT_LLM_PROVIDER,
+            configuration=configuration,
+            model=self.model_config["model"]
         )
 
         # Clean the response content
-        response_text = response.choices[0].message.content.strip()
-        response_text = response_text[response_text.find('{'):response_text.rfind('}')+1]
+        response_text = response[response.find('{'):response.rfind('}')+1]
         
         try:
             suggestions = json.loads(response_text)
@@ -172,24 +173,28 @@ class SFNJoinSuggestionsAgent(SFNAgent):
             'initial_suggestions': suggestions,
             'verification_results': verification_results
         }
-        system_prompt, user_prompt = self.prompt_manager.get_prompt('final_join_suggestions_generator',llm_provider='openai',**context)
+        system_prompt, user_prompt = self.prompt_manager.get_prompt('final_join_suggestions_generator',llm_provider=DEFAULT_LLM_PROVIDER,**context)
         
         print("\n\n>>>final recommendations prompt",user_prompt,system_prompt)
-        response = self.client.chat.completions.create(
-            model=self.model_config["model"],
-            messages=[
+        configuration = {
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=self.model_config["temperature"],
-            max_tokens=self.model_config["max_tokens"],
-            n=self.model_config["n"],
-            stop=self.model_config["stop"]
+            "temperature": self.model_config["temperature"],
+            "max_tokens": self.model_config["max_tokens"],
+            "n": self.model_config["n"],
+            "stop": self.model_config["stop"]
+        }
+        # Get suggestions from LLM
+        response, token_cost_summary = self.ai_handler.route_to(
+            llm_provider=DEFAULT_LLM_PROVIDER,
+            configuration=configuration,
+            model=self.model_config["model"]
         )
         
         try:
-            recommendations = response.choices[0].message.content.strip()
-            recommendations = recommendations.replace('```json', '').replace('```', '')
+            recommendations = response.replace('```json', '').replace('```', '')
             print("\n\n>>>final recommendations",recommendations)
             try:
                 return json.loads(recommendations)  # Return parsed JSON
@@ -293,3 +298,35 @@ class SFNJoinSuggestionsAgent(SFNAgent):
             "overlap_percentage": (len(merged_df) / min(len(table1), len(table2))) * 100
         }
         return verification_results
+    
+    def get_validation_params(self, response: str, validation_task: Task) -> dict:
+        """
+        Generate validation prompts for the category identification response.
+        
+        :param response: The category identification response to validate
+        :param validation_task: Task object containing validation context
+        :return: Dictionary containing validation prompts
+        """
+        print(f'validation_task.data:{validation_task.data}')
+        if not isinstance(validation_task.data, dict) or 'table1' not in validation_task.data or 'table2' not in validation_task.data:
+            raise ValueError("Task data must be a dictionary containing 'table1' and 'table2' DataFrames")
+
+        # Extract metadata
+        metadata = self._extract_metadata(validation_task.data['table1'], validation_task.data['table2'])
+        
+        # Prepare context for validation
+        validation_context = {
+            'actual_output': '\n'.join(response['final_recommendations']),  # Convert list of suggestions to string
+            'initial_suggestions':'\n'.join(response['initial_suggestions']),
+            'verification_results': '\n'.join(response['verification_results']),
+            'metadata': metadata,
+        }
+        # Get validation prompts from prompt config
+        validation_prompts = self.prompt_manager.get_prompt(
+            agent_type='final_join_suggestions_generator',
+            llm_provider=DEFAULT_LLM_PROVIDER,
+            prompt_type='validation',
+            **validation_context
+        )
+        
+        return validation_prompts

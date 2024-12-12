@@ -1,5 +1,6 @@
 from sfn_blueprint import MODEL_CONFIG
 
+DEFAULT_LLM_PROVIDER='openai'
 MODEL_CONFIG["join_suggestions_generator"] = {
     "model": "gpt-4o-mini",
     "temperature": 0.3,

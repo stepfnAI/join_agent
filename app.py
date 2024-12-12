@@ -1,4 +1,3 @@
-import sys
 import os
 from sfn_blueprint import Task
 from sfn_blueprint import SFNStreamlitView
@@ -6,16 +5,18 @@ from sfn_blueprint import SFNSessionManager
 from sfn_blueprint import SFNDataLoader
 from sfn_blueprint import setup_logger
 from sfn_blueprint import SFNDataPostProcessor
+from sfn_blueprint import SFNValidateAndRetryAgent
 from agents.join_suggestions_agent import SFNJoinSuggestionsAgent
 from views.streamlit_views import StreamlitView
 from views.display_join_health import display_join_health
 import json
+from config.model_config import DEFAULT_LLM_PROVIDER
 
 def run_app():
     # Initialize view and session
     view = StreamlitView(title="Data Join Advisor")
+    sfn_view = SFNStreamlitView(title="Data Join Advisor")
     session = SFNSessionManager()
-    
     # Reset button
     col1, col2 = view.create_columns([7, 1])
     with col1:
@@ -56,21 +57,33 @@ def run_app():
     if uploaded_file1 is not None and uploaded_file2 is not None:
         if session.get('table1') is None or session.get('table2') is None:
             with view.display_spinner('Loading data...'):
-                data_loader = SFNDataLoader()
-                
-                # Load table 1
-                load_task1 = Task("Load first file", data=uploaded_file1)
-                table1 = data_loader.execute_task(load_task1)
-                session.set('table1', table1)
-                
-                # Load table 2
-                load_task2 = Task("Load second file", data=uploaded_file2)
-                table2 = data_loader.execute_task(load_task2)
-                session.set('table2', table2)
-                
-                logger.info(f"Data loaded successfully. Table1 shape: {table1.shape}, Table2 shape: {table2.shape}")
-                view.show_message("✅ Both tables loaded successfully!", "success")
-
+                try:
+                    data_loader = SFNDataLoader()
+                    
+                    # Load table 1
+                    # Save the uploaded file temporarily and get its path
+                    file_path1 = sfn_view.save_uploaded_file(uploaded_file1)
+                    load_task1 = Task("Load the uploaded file 1", data=uploaded_file1, path=file_path1)
+                    table1 = data_loader.execute_task(load_task1)
+                    session.set('table1', table1)
+                    
+                    # Load table 2
+                    # Save the uploaded file temporarily and get its path
+                    file_path2 = sfn_view.save_uploaded_file(uploaded_file2)
+                    load_task2 = Task("Load the uploaded file 2", data=uploaded_file2, path=file_path2)
+                    table2 = data_loader.execute_task(load_task2)
+                    session.set('table2', table2)
+                    
+                    
+                    # Delete temp files created by loader after processing
+                    if os.path.isfile(file_path1) and os.path.isfile(file_path2):
+                        sfn_view.delete_uploaded_file(file_path1)
+                        sfn_view.delete_uploaded_file(file_path2)
+                    
+                    logger.info(f"Data loaded successfully. Table1 shape: {table1.shape}, Table2 shape: {table2.shape}")
+                    view.show_message("✅ Both tables loaded successfully!", "success")
+                except Exception as e:
+                    logger.error(f"Error while loading and saving file: {e}")
         # Display data previews
         view.display_subheader("Data Preview")
         col1, col2 = view.create_columns(2)
@@ -85,7 +98,6 @@ def run_app():
         view.display_header("Step 2: Join Analysis")
         view.display_markdown("---")
 
-
         if session.get('join_analysis') is None:
             # Initial Analysis
             with view.display_spinner('🤖 AI is analyzing possible join combinations...'):
@@ -93,9 +105,37 @@ def run_app():
                 analysis_task = Task("Analyze join possibilities", 
                                 data={'table1': session.get('table1'),
                                         'table2': session.get('table2')})
-                join_analysis = join_analyzer.execute_task(analysis_task)
-                session.set('join_analysis', join_analysis)
-                logger.info("Join analysis completed")
+                # join_analysis = join_analyzer.execute_task(analysis_task)
+                # Create validation task with same data
+                validation_task = Task("Validate join", 
+                                    data={
+                                        'table1': session.get('table1'),
+                                        'table2': session.get('table2')
+                                    })
+                
+                validate_and_retry_agent = SFNValidateAndRetryAgent(
+                    llm_provider=DEFAULT_LLM_PROVIDER, 
+                    for_agent='feature_suggester'
+                )
+
+                try:
+                    join_analysis, validation_message, is_validation_success = validate_and_retry_agent.complete(
+                        agent_to_validate=join_analyzer,
+                        task=analysis_task,
+                        validation_task=validation_task,
+                        method_name='execute_task',
+                        get_validation_params='get_validation_params',
+                        max_retries=3,
+                        retry_delay=3.0
+                    )
+                    view.session_state['is_validation_success'] = is_validation_success
+                    view.session_state['validation_message'] = validation_message
+                    session.set('join_analysis', join_analysis)
+                    logger.info("Join analysis completed")
+                except Exception as e:
+                    view.show_message(f"❌ Error: {str(e)}", "error")
+                    logger.error(str(e))
+                    
 
         if session.get('join_analysis'):
             analysis = session.get('join_analysis')
@@ -153,44 +193,48 @@ def run_app():
                     
                     view.display_markdown("---")
 
-                    # Display AI's recommendation
-                    view.display_subheader("AI Recommended Join Strategy")
-                    recommendation = analysis['final_recommendations']
-                
+                    if view.session_state.is_validation_success:
+                        # Display AI's recommendationAI Recommended Join Strategy
+                        view.display_subheader("AI Recommended Join Strategy")
+                        recommendation = analysis['final_recommendations']
+                    
 
-                    if 'recommended_join' in recommendation:  # Check for the nested structure
-                        recommended_join = recommendation['recommended_join']  # Get the nested object
-                        # Safely construct the message
-                        message = (
-                            f"🎯 Recommended Join Fields:\n"
-                            f"- Date: {recommended_join.get('date_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('date_mapping', {}).get('table2_field', 'N/A')}\n"
-                            f"- Customer: {recommended_join.get('customer_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('customer_mapping', {}).get('table2_field', 'N/A')}"
-                        )
-                        
-                        # Only add product mapping info if it exists and has valid fields
-                        if (recommended_join.get('product_mapping') and 
-                            recommended_join.get('product_mapping', {}).get('table1_field') and 
-                            recommended_join.get('product_mapping', {}).get('table2_field')):
-                            message += f"\n- Product: {recommended_join['product_mapping']['table1_field']} ↔ {recommended_join['product_mapping']['table2_field']}"
-                        
-                        view.show_message(message, "success")
-                        
-                        # Only show explanation if it exists
-                        if 'explanation' in recommended_join:
-                            view.show_message(f"📝 Reasoning:\n{recommended_join['explanation']}", "info")
+                        if 'recommended_join' in recommendation:  # Check for the nested structure
+                            recommended_join = recommendation['recommended_join']  # Get the nested object
+                            # Safely construct the message
+                            message = (
+                                f"🎯 Recommended Join Fields:\n"
+                                f"- Date: {recommended_join.get('date_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('date_mapping', {}).get('table2_field', 'N/A')}\n"
+                                f"- Customer: {recommended_join.get('customer_mapping', {}).get('table1_field', 'N/A')} ↔ {recommended_join.get('customer_mapping', {}).get('table2_field', 'N/A')}"
+                            )
+                            
+                            # Only add product mapping info if it exists and has valid fields
+                            if (recommended_join.get('product_mapping') and 
+                                recommended_join.get('product_mapping', {}).get('table1_field') and 
+                                recommended_join.get('product_mapping', {}).get('table2_field')):
+                                message += f"\n- Product: {recommended_join['product_mapping']['table1_field']} ↔ {recommended_join['product_mapping']['table2_field']}"
+                            
+                            view.show_message(message, "success")
+                            
+                            # Only show explanation if it exists
+                            if 'explanation' in recommended_join:
+                                view.show_message(f"📝 Reasoning:\n{recommended_join['explanation']}", "info")
+                            else:
+                                view.show_message("📝 No detailed explanation available for this recommendation.", "info")
                         else:
-                            view.show_message("📝 No detailed explanation available for this recommendation.", "info")
-                    else:
-                        view.show_message("❌ No recommendation available.", "error")
+                            view.show_message("❌ No recommendation available.", "error")
 
-                    join_choice = view.radio_select(
-                        "How would you like to proceed?",
-                        options=[
-                            "Select Appropriate Method",
-                            "Use AI Recommended Join Strategy",
-                            "Select Columns Manually"
-                        ]
-                    )
+                        join_choice = view.radio_select(
+                            "How would you like to proceed?",
+                            options=[
+                                "Select Appropriate Method",
+                                "Use AI Recommended Join Strategy",
+                                "Select Columns Manually"
+                            ]
+                        )
+                    else:
+                        view.show_message(f"⚠️ Warning: {view.session_state.validation_message}", "warning")    
+                        join_choice = "Select Columns Manually"
 
                 # Show AI recommendation details and health check option
                 if join_choice == "Use AI Recommended Join Strategy":
