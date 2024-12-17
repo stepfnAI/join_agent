@@ -3,12 +3,12 @@ import os
 from sfn_blueprint import Task
 from sfn_blueprint import SFNStreamlitView
 from sfn_blueprint import SFNSessionManager
-from sfn_blueprint import SFNDataLoader
 from sfn_blueprint import setup_logger
 from sfn_blueprint import SFNDataPostProcessor
 from agents.join_suggestions_agent import SFNJoinSuggestionsAgent
 from views.streamlit_views import StreamlitView
 from views.display_join_health import display_join_health
+from utils.custom_data_loader import CustomDataLoader
 import json
 
 def run_app():
@@ -56,7 +56,7 @@ def run_app():
     if uploaded_file1 is not None and uploaded_file2 is not None:
         if session.get('table1') is None or session.get('table2') is None:
             with view.display_spinner('Loading data...'):
-                data_loader = SFNDataLoader()
+                data_loader = CustomDataLoader()
                 
                 # Load table 1
                 load_task1 = Task("Load first file", data=uploaded_file1)
