@@ -10,3 +10,4 @@ __pycache__
 temp.ipynb
 venv
 temp_files
+.env
