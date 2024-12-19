@@ -10,3 +10,4 @@ __pycache__
 temp.ipynb
 .env
 .env.local
+.pyc

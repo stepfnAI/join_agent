@@ -1,8 +1,6 @@
-
-
 def display_join_health(verification_results, view, session):
     """Display join health status"""
-    combined_metrics = verification_results['combined_overlap']
+    combined_metrics = verification_results.get('combined_overlap', {})
     selected_join = session.get('selected_join')
 
     # Create field keys for verification results
@@ -12,6 +10,7 @@ def display_join_health(verification_results, view, session):
     # Create a comprehensive message combining both recommendation and health metrics
     message = (
         f"🎯 **Selected Join Strategy:**\n\n"  # Added extra newline for spacing
+        f"   ⚡ Join Type: **INNER JOIN**\n\n"  # Added join type information
         f"   • Customer: {selected_join['customer_mapping']['table1_field']} ↔ {selected_join['customer_mapping']['table2_field']}"
         f" (Match Rate: {verification_results[customer_key]['overlap_percentage']:.1f}%)\n\n"
     )
@@ -49,8 +48,15 @@ def display_join_health(verification_results, view, session):
         f"\n📊 **Overall Join Impact:**\n\n"  # Added extra newline for spacing
         f"   • Total Records: {combined_metrics['total_records_table1']:,} (Table 1) ↔ {combined_metrics['total_records_table2']:,} (Table 2)\n\n"
         f"   • Matching Records: {combined_metrics['matching_records']:,}\n\n"
-        f"   • Overall Match Rate: {combined_metrics['overlap_percentage']:.1f}%"
     )
+
+    # Add warning if there's record multiplication
+    if combined_metrics.get('has_duplicates'):
+        message += (
+            f"⚠️ **Note:** {combined_metrics['duplicate_warning']}\n\n"
+        )
+
+    message += f"   • Overall Match Rate: {combined_metrics['overlap_percentage']:.1f}%"
 
     if session.get('join_confirmed'):
         view.show_message(message, "success")
