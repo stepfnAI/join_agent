@@ -23,7 +23,7 @@ An AI-powered data joining tool that analyzes your datasets and provides intelli
 
 🚀 Getting Started
 **Prerequisites**
-- Python 3.7+
+- Python 3.8+
 - OpenAI API key
 
 Installation
